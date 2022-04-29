@@ -11,6 +11,9 @@ softmmu_ss.add(when: 'CONFIG_USB', if_true: files(
   'pcap.c',
 ))
 
+softmmu_ss.add(when: 'CONFIG_APPLE_OTG', if_true: files('apple_otg.c'))
+softmmu_ss.add(when: 'CONFIG_USB_TCP', if_true: files('dev-tcp-remote.c', 'hcd-tcp.c'))
+
 # usb host adapters
 softmmu_ss.add(when: 'CONFIG_USB_UHCI', if_true: files('hcd-uhci.c'))
 softmmu_ss.add(when: 'CONFIG_USB_OHCI', if_true: files('hcd-ohci.c'))

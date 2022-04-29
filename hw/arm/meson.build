@@ -1,5 +1,22 @@
 arm_ss = ss.source_set()
 arm_ss.add(files('boot.c'), fdt)
+arm_ss.add(when: 'CONFIG_APPLE_SOC', if_true: files(
+    's8000.c',
+    't8030.c',
+    'apple_a13.c',
+    'apple_a13_gxf.c',
+    'apple_a9.c',
+    'apple_sep.c',
+    'xnu_dtb.c',
+    'xnu_mem.c',
+    'xnu.c',
+    'xnu_pf.c',
+    'xnu_kpf.c')
+)
+
+arm_ss.add(when: 'CONFIG_APPLE_DART', if_true: files('apple_dart.c'))
+arm_ss.add(when: 'CONFIG_APPLE_SART', if_true: files('apple_sart.c'))
+arm_ss.add(when: 'TARGET_AARCH64', if_true: tasn1)
 arm_ss.add(when: 'CONFIG_PLATFORM_BUS', if_true: files('sysbus-fdt.c'))
 arm_ss.add(when: 'CONFIG_ARM_VIRT', if_true: files('virt.c'))
 arm_ss.add(when: 'CONFIG_ACPI', if_true: files('virt-acpi-build.c'))

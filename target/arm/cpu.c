@@ -240,6 +240,11 @@ static void arm_cpu_reset(DeviceState *dev)
         /* Sample rvbar at reset.  */
         env->cp15.rvbar = cpu->rvbar_prop;
         env->pc = env->cp15.rvbar;
+
+        if (cpu_isar_feature(aa64_pauth, cpu)) {
+            env->keys.m.lo = cpu->m_key_lo;
+            env->keys.m.hi = cpu->m_key_hi;
+        }
 #endif
     } else {
 #if defined(CONFIG_USER_ONLY)
@@ -852,13 +857,14 @@ static void aarch64_cpu_dump_state(CPUState *cs, FILE *f, int flags)
     } else {
         ns_status = "";
     }
-    qemu_fprintf(f, "PSTATE=%08x %c%c%c%c %sEL%d%c",
+    qemu_fprintf(f, "PSTATE=%08x %c%c%c%c %s%cL%d%c",
                  psr,
                  psr & PSTATE_N ? 'N' : '-',
                  psr & PSTATE_Z ? 'Z' : '-',
                  psr & PSTATE_C ? 'C' : '-',
                  psr & PSTATE_V ? 'V' : '-',
                  ns_status,
+                 arm_is_guarded(env) ? 'G' : 'E',
                  el,
                  psr & PSTATE_SP ? 'h' : 't');
 
@@ -1144,6 +1150,9 @@ static Property arm_cpu_has_el2_property =
 
 static Property arm_cpu_has_el3_property =
             DEFINE_PROP_BOOL("has_el3", ARMCPU, has_el3, true);
+
+static Property arm_cpu_has_gxf_property =
+            DEFINE_PROP_BOOL("has_gxf", ARMCPU, has_gxf, false);
 #endif
 
 static Property arm_cpu_cfgend_property =
@@ -1261,6 +1270,10 @@ void arm_cpu_post_init(Object *obj)
 
     if (arm_feature(&cpu->env, ARM_FEATURE_EL2)) {
         qdev_property_add_static(DEVICE(obj), &arm_cpu_has_el2_property);
+    }
+
+    if (arm_feature(&cpu->env, ARM_FEATURE_GXF)) {
+        qdev_property_add_static(DEVICE(obj), &arm_cpu_has_gxf_property);
     }
 #endif
 
@@ -1744,7 +1757,10 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
            !cpu_isar_feature(aa32_vfp_simd, cpu) ||
            !arm_feature(env, ARM_FEATURE_XSCALE));
 
-    if (arm_feature(env, ARM_FEATURE_V7) &&
+    if (arm_feature(env, ARM_FEATURE_V8)) {
+        // TODO: better condition for 16k pages
+        pagebits = 14;
+    } else if (arm_feature(env, ARM_FEATURE_V7) &&
         !arm_feature(env, ARM_FEATURE_M) &&
         !arm_feature(env, ARM_FEATURE_PMSA)) {
         /* v7VMSA drops support for the old ARMv5 tiny pages, so we
@@ -1800,6 +1816,10 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
          */
         cpu->isar.id_pfr1 &= ~0xf0;
         cpu->isar.id_aa64pfr0 &= ~0xf000;
+    }
+
+    if (!cpu->has_gxf) {
+        unset_feature(env, ARM_FEATURE_GXF);
     }
 
     if (!cpu->has_el2) {

@@ -914,6 +914,9 @@ static void aarch64_max_initfn(Object *obj)
     cpu->dcz_blocksize = 7; /*  512 bytes */
 #endif
 
+    /* GXF is available, disabled by default */
+    set_feature(&cpu->env, ARM_FEATURE_GXF);
+
     bitmap_fill(cpu->sve_vq_supported, ARM_MAX_VQ);
 
     aarch64_add_pauth_properties(obj);

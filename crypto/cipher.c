@@ -132,12 +132,8 @@ qcrypto_cipher_validate_key_length(QCryptoCipherAlgorithm alg,
     return true;
 }
 
-#ifdef CONFIG_GCRYPT
-#include "cipher-gcrypt.c.inc"
-#elif defined CONFIG_NETTLE
+#ifdef CONFIG_NETTLE
 #include "cipher-nettle.c.inc"
-#elif defined CONFIG_GNUTLS_CRYPTO
-#include "cipher-gnutls.c.inc"
 #else
 #include "cipher-builtin.c.inc"
 #endif
@@ -195,6 +191,20 @@ int qcrypto_cipher_setiv(QCryptoCipher *cipher,
 {
     const QCryptoCipherDriver *drv = cipher->driver;
     return drv->cipher_setiv(cipher, iv, niv, errp);
+}
+
+
+int qcrypto_cipher_getiv(QCryptoCipher *cipher,
+                         uint8_t *iv, size_t niv,
+                         Error **errp)
+{
+    const QCryptoCipherDriver *drv = cipher->driver;
+    if (drv->cipher_getiv) {
+        return drv->cipher_getiv(cipher, iv, niv, errp);
+    } else {
+        error_setg(errp, "Get IV is not supported for cipher");
+        return -1;
+    }
 }
 
 

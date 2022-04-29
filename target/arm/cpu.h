@@ -55,6 +55,8 @@
 #define EXCP_LSERR          21   /* v8M LSERR SecureFault */
 #define EXCP_UNALIGNED      22   /* v7M UNALIGNED UsageFault */
 #define EXCP_DIVBYZERO      23   /* v7M DIVBYZERO UsageFault */
+#define EXCP_GENTER         24
+#define EXCP_GXF_ABORT      25
 /* NB: add new EXCP_ defines to the array in arm_log_exception() too */
 
 #define ARMV7M_EXCP_RESET   1
@@ -233,6 +235,37 @@ typedef struct CPUARMTBFlags {
     uint32_t flags;
     target_ulong flags2;
 } CPUARMTBFlags;
+
+#define APRR_ATTR_X (1ULL)
+#define APRR_ATTR_W (2ULL)
+#define APRR_ATTR_R (4ULL)
+
+#define APRR_ATTR_WX  (APRR_ATTR_W | APRR_ATTR_X)
+#define APRR_ATTR_RX  (APRR_ATTR_R | APRR_ATTR_X)
+#define APRR_ATTR_RWX (APRR_ATTR_R | APRR_ATTR_W | APRR_ATTR_X)
+
+#define APRR_ATTR_NONE (0ULL)
+#define APRR_ATTR_MASK (APRR_ATTR_RWX)
+
+#define SPRR_ATTR_MASK (15ULL)
+
+#define APRR_SHIFT_FOR_IDX(x) \
+	((x) << 2ULL)
+
+#define APRR_EXTRACT_IDX_ATTR(_aprr_value, _idx) \
+	(((_aprr_value) >> APRR_SHIFT_FOR_IDX(_idx)) & APRR_ATTR_MASK)
+
+#define SPRR_SHIFT_FOR_IDX(x) \
+	((x) << 2ULL)
+
+#define SPRR_EXTRACT_IDX_ATTR(_sprr_value, _idx) \
+	(((_sprr_value) >> SPRR_SHIFT_FOR_IDX(_idx)) & SPRR_ATTR_MASK)
+
+#define SPRR_MASK_SHIFT_FOR_IDX(x) \
+	((x) << 1ULL)
+
+#define SPRR_MASK_EXTRACT_IDX_ATTR(_sprr_mask_value, _idx) \
+	(((_sprr_mask_value) >> SPRR_MASK_SHIFT_FOR_IDX(_idx)) & APRR_ATTR_MASK)
 
 typedef struct CPUArchState {
     /* Regs for current mode.  */
@@ -524,7 +557,32 @@ typedef struct CPUArchState {
         uint64_t tfsr_el[4]; /* tfsre0_el1 is index 0.  */
         uint64_t gcr_el1;
         uint64_t rgsr_el1;
+        uint64_t vmsa_lock_el1;
+        uint64_t apctl_el1;
+        uint64_t apcfg_el1;
     } cp15;
+
+    struct {
+        uint64_t gxf_config_el[4];
+        uint64_t gxf_enter_el[4];
+        uint64_t gxf_status_el[4];
+        uint64_t gxf_abort_el[4];
+        uint64_t sp_gl[4];
+        uint64_t tpidr_gl[4];
+        uint64_t vbar_gl[4];
+        uint64_t spsr_gl[4];
+        uint64_t aspsr_gl[4];
+        uint64_t esr_gl[4];
+        uint64_t elr_gl[4];
+        uint64_t far_gl[4];
+    } gxf;
+
+    struct {
+        uint64_t sprr_perm_el[4];
+        uint64_t sprr_config_el[4];
+        uint64_t sprr_unk_el[4];
+        uint32_t sprr_umask;
+    } sprr;
 
     struct {
         /* M profile has up to 4 stack pointers:
@@ -679,6 +737,8 @@ typedef struct CPUArchState {
         ARMPACKey apda;
         ARMPACKey apdb;
         ARMPACKey apga;
+        ARMPACKey kernel;
+        ARMPACKey m;
     } keys;
 #endif
 
@@ -850,6 +910,8 @@ struct ArchCPU {
     bool has_el2;
     /* CPU has security extension */
     bool has_el3;
+    /* CPU has Apple's GXF support */
+    bool has_gxf;
     /* CPU has PMU (Performance Monitor Unit) */
     bool has_pmu;
     /* CPU has VFP */
@@ -1034,6 +1096,10 @@ struct ArchCPU {
 
     /* Generic timer counter frequency, in Hz */
     uint64_t gt_cntfrq_hz;
+
+    /* Apple PAC boot diversifier */
+    uint64_t m_key_lo;
+    uint64_t m_key_hi;
 };
 
 unsigned int gt_cntfrq_period_ns(ARMCPU *cpu);
@@ -1353,6 +1419,19 @@ void pmu_init(ARMCPU *cpu);
 #define PSTATE_MODE_EL1h 5
 #define PSTATE_MODE_EL1t 4
 #define PSTATE_MODE_EL0t 0
+/* VMSA_LOCK_EL1 */
+#define VMSA_LOCK_VBAR_EL1      (1ULL << 0)
+#define VMSA_LOCK_SCTLR_EL1     (1ULL << 1)
+#define VMSA_LOCK_TCR_EL1       (1ULL << 2)
+#define VMSA_LOCK_TTBR0_EL1     (1ULL << 3)
+#define VMSA_LOCK_TTBR1_EL1     (1ULL << 4)
+#define VMSA_LOCK_SCTLR_M_BIT   (1ULL << 63)
+/* APCTL_EL1 */
+#define APCTL_AppleMode         (1ULL << 0)
+#define APCTL_MKEYVld           (1ULL << 1)
+#define APCTL_KernKeyEn         (1ULL << 2)
+/* APCFG_EL1 */
+#define APCFG_EL1_ELXENKEY      (1ULL << 1)
 
 /* Write a new value to v7m.exception, thus transitioning into or out
  * of Handler mode; this may result in a change of active stack pointer.
@@ -2157,6 +2236,7 @@ enum arm_features {
     ARM_FEATURE_M_SECURITY, /* M profile Security Extension */
     ARM_FEATURE_M_MAIN, /* M profile Main Extension */
     ARM_FEATURE_V8_1M, /* M profile extras only in v8.1M and later */
+    ARM_FEATURE_GXF, /* has Apple's GXF support */
 };
 
 static inline int arm_feature(CPUARMState *env, int feature)
@@ -2733,6 +2813,20 @@ static inline int arm_current_el(CPUARMState *env)
     }
 }
 
+/* Return true if the processor is in GXF state */
+static inline bool arm_is_guarded(CPUARMState *env)
+{
+    return arm_feature(env, ARM_FEATURE_GXF) && (arm_current_el(env) > 0) &&
+           (env->gxf.gxf_status_el[arm_current_el(env)] & 1);
+}
+
+/* Return true if the processor has SPRR enabled */
+static inline bool arm_is_sprr_enabled(CPUARMState *env)
+{
+    return env->sprr.sprr_config_el[arm_current_el(env)] & 1;
+}
+
+
 typedef struct ARMCPRegInfo ARMCPRegInfo;
 
 typedef enum CPAccessResult {
@@ -3112,12 +3206,13 @@ bool write_cpustate_to_list(ARMCPU *cpu, bool kvm_sync);
  * For M profile we arrange them to have a bit for priv, a bit for negpri
  * and a bit for secure.
  */
-#define ARM_MMU_IDX_A     0x10  /* A profile */
-#define ARM_MMU_IDX_NOTLB 0x20  /* does not have a TLB */
-#define ARM_MMU_IDX_M     0x40  /* M profile */
+#define ARM_MMU_IDX_A     0x20  /* A profile */
+#define ARM_MMU_IDX_NOTLB 0x40  /* does not have a TLB */
+#define ARM_MMU_IDX_M     0x80  /* M profile */
 
 /* Meanings of the bits for A profile mmu idx values */
 #define ARM_MMU_IDX_A_NS     0x8
+#define ARM_MMU_IDX_A_GXF    0x10
 
 /* Meanings of the bits for M profile mmu idx values */
 #define ARM_MMU_IDX_M_PRIV   0x1
@@ -3126,7 +3221,7 @@ bool write_cpustate_to_list(ARMCPU *cpu, bool kvm_sync);
 
 #define ARM_MMU_IDX_TYPE_MASK \
     (ARM_MMU_IDX_A | ARM_MMU_IDX_M | ARM_MMU_IDX_NOTLB)
-#define ARM_MMU_IDX_COREIDX_MASK 0xf
+#define ARM_MMU_IDX_COREIDX_MASK 0x1f
 
 typedef enum ARMMMUIdx {
     /*
@@ -3149,6 +3244,12 @@ typedef enum ARMMMUIdx {
     ARMMMUIdx_E20_2_PAN = ARMMMUIdx_SE20_2_PAN | ARM_MMU_IDX_A_NS,
     ARMMMUIdx_E2        = ARMMMUIdx_SE2 | ARM_MMU_IDX_A_NS,
 
+    ARMMMUIdx_GE10_1     = ARMMMUIdx_E10_1 | ARM_MMU_IDX_A_GXF,
+    ARMMMUIdx_GE20_2     = ARMMMUIdx_E20_2 | ARM_MMU_IDX_A_GXF,
+    ARMMMUIdx_GE10_1_PAN = ARMMMUIdx_E10_1_PAN | ARM_MMU_IDX_A_GXF,
+    ARMMMUIdx_GE20_2_PAN = ARMMMUIdx_E20_2_PAN | ARM_MMU_IDX_A_GXF,
+    ARMMMUIdx_GE2        = ARMMMUIdx_E2 | ARM_MMU_IDX_A_GXF,
+
     /*
      * These are not allocated TLBs and are used only for AT system
      * instructions or for the first stage of an S12 page table walk.
@@ -3159,6 +3260,8 @@ typedef enum ARMMMUIdx {
     ARMMMUIdx_Stage1_SE0 = 3 | ARM_MMU_IDX_NOTLB,
     ARMMMUIdx_Stage1_SE1 = 4 | ARM_MMU_IDX_NOTLB,
     ARMMMUIdx_Stage1_SE1_PAN = 5 | ARM_MMU_IDX_NOTLB,
+    ARMMMUIdx_Stage1_GE1 = 6 | ARM_MMU_IDX_NOTLB,
+    ARMMMUIdx_Stage1_GE1_PAN = 7 | ARM_MMU_IDX_NOTLB,
     /*
      * Not allocated a TLB: used only for second stage of an S12 page
      * table walk, or for descriptor loads during first stage of an S1
@@ -3166,8 +3269,8 @@ typedef enum ARMMMUIdx {
      * then various TLB flush insns which currently are no-ops or flush
      * only stage 1 MMU indexes will need to change to flush stage 2.
      */
-    ARMMMUIdx_Stage2     = 6 | ARM_MMU_IDX_NOTLB,
-    ARMMMUIdx_Stage2_S   = 7 | ARM_MMU_IDX_NOTLB,
+    ARMMMUIdx_Stage2     = 8 | ARM_MMU_IDX_NOTLB,
+    ARMMMUIdx_Stage2_S   = 9 | ARM_MMU_IDX_NOTLB,
 
     /*
      * M-profile.
@@ -3205,6 +3308,11 @@ typedef enum ARMMMUIdxBit {
     TO_CORE_BIT(SE20_2_PAN),
     TO_CORE_BIT(SE2),
     TO_CORE_BIT(SE3),
+    TO_CORE_BIT(GE10_1),
+    TO_CORE_BIT(GE10_1_PAN),
+    TO_CORE_BIT(GE2),
+    TO_CORE_BIT(GE20_2),
+    TO_CORE_BIT(GE20_2_PAN),
 
     TO_CORE_BIT(MUser),
     TO_CORE_BIT(MPriv),
@@ -3444,14 +3552,14 @@ FIELD(TBFLAG_ANY, AARCH64_STATE, 0, 1)
 FIELD(TBFLAG_ANY, SS_ACTIVE, 1, 1)
 FIELD(TBFLAG_ANY, PSTATE__SS, 2, 1)      /* Not cached. */
 FIELD(TBFLAG_ANY, BE_DATA, 3, 1)
-FIELD(TBFLAG_ANY, MMUIDX, 4, 4)
+FIELD(TBFLAG_ANY, MMUIDX, 4, 5)
 /* Target EL if we take a floating-point-disabled exception */
-FIELD(TBFLAG_ANY, FPEXC_EL, 8, 2)
+FIELD(TBFLAG_ANY, FPEXC_EL, 9, 2)
 /* For A-profile only, target EL for debug exceptions.  */
-FIELD(TBFLAG_ANY, DEBUG_TARGET_EL, 10, 2)
+FIELD(TBFLAG_ANY, DEBUG_TARGET_EL, 11, 2)
 /* Memory operations require alignment: SCTLR_ELx.A or CCR.UNALIGN_TRP */
-FIELD(TBFLAG_ANY, ALIGN_MEM, 12, 1)
-FIELD(TBFLAG_ANY, PSTATE__IL, 13, 1)
+FIELD(TBFLAG_ANY, ALIGN_MEM, 13, 1)
+FIELD(TBFLAG_ANY, PSTATE__IL, 14, 1)
 
 /*
  * Bit usage when in AArch32 state, both A- and M-profile.

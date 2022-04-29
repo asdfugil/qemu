@@ -202,7 +202,11 @@ int arm_rmode_to_sf(int rmode);
 static inline void aarch64_save_sp(CPUARMState *env, int el)
 {
     if (env->pstate & PSTATE_SP) {
-        env->sp_el[el] = env->xregs[31];
+        if (arm_is_guarded(env)) {
+            env->gxf.sp_gl[el] = env->xregs[31];
+        } else {
+            env->sp_el[el] = env->xregs[31];
+        }
     } else {
         env->sp_el[0] = env->xregs[31];
     }
@@ -211,7 +215,11 @@ static inline void aarch64_save_sp(CPUARMState *env, int el)
 static inline void aarch64_restore_sp(CPUARMState *env, int el)
 {
     if (env->pstate & PSTATE_SP) {
-        env->xregs[31] = env->sp_el[el];
+        if (arm_is_guarded(env)) {
+            env->xregs[31] = env->gxf.sp_gl[el];
+        } else {
+            env->xregs[31] = env->sp_el[el];
+        }
     } else {
         env->xregs[31] = env->sp_el[0];
     }
@@ -342,6 +350,7 @@ typedef enum ARMFaultType {
     ARMFault_ICacheMaint,
     ARMFault_QEMU_NSCExec, /* v8M: NS executing in S&NSC memory */
     ARMFault_QEMU_SFault, /* v8M: SecureFault INVTRAN, INVEP or AUVIOL */
+    ARMFault_GXF_Abort,
 } ARMFaultType;
 
 /**
@@ -529,6 +538,10 @@ static inline uint32_t arm_fi_to_lfsc(ARMMMUFaultInfo *fi)
     case ARMFault_Exclusive:
         fsc = 0x35;
         break;
+    case ARMFault_GXF_Abort:
+        /* TODO: GXF set this properly */
+        fsc = (fi->level & 3) | (0x3 << 2);
+        break;
     default:
         /* Other faults can't occur in a context that requires a
          * long-format status code.
@@ -583,6 +596,8 @@ static inline ARMMMUIdx core_to_aa64_mmu_idx(int mmu_idx)
 }
 
 int arm_mmu_idx_to_el(ARMMMUIdx mmu_idx);
+
+int arm_mmu_idx_is_guarded(ARMMMUIdx mmu_idx);
 
 /*
  * Return the MMU index for a v7M CPU with all relevant information
@@ -646,6 +661,8 @@ static inline bool regime_has_2_ranges(ARMMMUIdx mmu_idx)
     case ARMMMUIdx_Stage1_SE0:
     case ARMMMUIdx_Stage1_SE1:
     case ARMMMUIdx_Stage1_SE1_PAN:
+    case ARMMMUIdx_Stage1_GE1:
+    case ARMMMUIdx_Stage1_GE1_PAN:
     case ARMMMUIdx_E10_0:
     case ARMMMUIdx_E10_1:
     case ARMMMUIdx_E10_1_PAN:
@@ -674,10 +691,17 @@ static inline bool regime_is_secure(CPUARMState *env, ARMMMUIdx mmu_idx)
     case ARMMMUIdx_E20_0:
     case ARMMMUIdx_E20_2:
     case ARMMMUIdx_E20_2_PAN:
+    case ARMMMUIdx_GE10_1:
+    case ARMMMUIdx_GE10_1_PAN:
+    case ARMMMUIdx_GE20_2:
+    case ARMMMUIdx_GE20_2_PAN:
     case ARMMMUIdx_Stage1_E0:
     case ARMMMUIdx_Stage1_E1:
     case ARMMMUIdx_Stage1_E1_PAN:
+    case ARMMMUIdx_Stage1_GE1:
+    case ARMMMUIdx_Stage1_GE1_PAN:
     case ARMMMUIdx_E2:
+    case ARMMMUIdx_GE2:
     case ARMMMUIdx_Stage2:
     case ARMMMUIdx_MPrivNegPri:
     case ARMMMUIdx_MUserNegPri:
@@ -711,8 +735,11 @@ static inline bool regime_is_pan(CPUARMState *env, ARMMMUIdx mmu_idx)
     switch (mmu_idx) {
     case ARMMMUIdx_Stage1_E1_PAN:
     case ARMMMUIdx_Stage1_SE1_PAN:
+    case ARMMMUIdx_Stage1_GE1_PAN:
     case ARMMMUIdx_E10_1_PAN:
     case ARMMMUIdx_E20_2_PAN:
+    case ARMMMUIdx_GE10_1_PAN:
+    case ARMMMUIdx_GE20_2_PAN:
     case ARMMMUIdx_SE10_1_PAN:
     case ARMMMUIdx_SE20_2_PAN:
         return true;
@@ -735,6 +762,9 @@ static inline uint32_t regime_el(CPUARMState *env, ARMMMUIdx mmu_idx)
     case ARMMMUIdx_Stage2_S:
     case ARMMMUIdx_SE2:
     case ARMMMUIdx_E2:
+    case ARMMMUIdx_GE20_2:
+    case ARMMMUIdx_GE20_2_PAN:
+    case ARMMMUIdx_GE2:
         return 2;
     case ARMMMUIdx_SE3:
         return 3;
@@ -746,11 +776,15 @@ static inline uint32_t regime_el(CPUARMState *env, ARMMMUIdx mmu_idx)
     case ARMMMUIdx_Stage1_E0:
     case ARMMMUIdx_Stage1_E1:
     case ARMMMUIdx_Stage1_E1_PAN:
+    case ARMMMUIdx_Stage1_GE1:
+    case ARMMMUIdx_Stage1_GE1_PAN:
     case ARMMMUIdx_Stage1_SE1:
     case ARMMMUIdx_Stage1_SE1_PAN:
     case ARMMMUIdx_E10_0:
     case ARMMMUIdx_E10_1:
     case ARMMMUIdx_E10_1_PAN:
+    case ARMMMUIdx_GE10_1:
+    case ARMMMUIdx_GE10_1_PAN:
     case ARMMMUIdx_MPrivNegPri:
     case ARMMMUIdx_MUserNegPri:
     case ARMMMUIdx_MPriv:
@@ -983,6 +1017,8 @@ static inline bool arm_mmu_idx_is_stage1_of_2(ARMMMUIdx mmu_idx)
     case ARMMMUIdx_Stage1_SE0:
     case ARMMMUIdx_Stage1_SE1:
     case ARMMMUIdx_Stage1_SE1_PAN:
+    case ARMMMUIdx_Stage1_GE1:
+    case ARMMMUIdx_Stage1_GE1_PAN:
         return true;
     default:
         return false;

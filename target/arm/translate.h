@@ -61,6 +61,8 @@ typedef struct DisasContext {
     uint32_t svc_imm;
     int aarch64;
     int current_el;
+    /* True if in GXF */
+    bool guarded;
     /* Debug target exception level for single-step exceptions */
     int debug_target_el;
     GHashTable *cp_regs;
@@ -88,6 +90,8 @@ typedef struct DisasContext {
     bool unpriv;
     /* True if v8.3-PAuth is active.  */
     bool pauth_active;
+    /* True if Apple's GXF is enabled */
+    bool gxf_active;
     /* True if v8.5-MTE access to tags is enabled.  */
     bool ata;
     /* True if v8.5-MTE tag checks affect the PE; index with is_unpriv.  */

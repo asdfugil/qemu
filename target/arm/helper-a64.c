@@ -34,6 +34,7 @@
 #include "qemu/atomic128.h"
 #include "fpu/softfloat.h"
 #include <zlib.h> /* For crc32 */
+#include "WKdm.h"
 
 /* C2.4.7 Multiply and divide */
 /* special cases for 0 and LLONG_MIN are mandated by the standard */
@@ -908,9 +909,17 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
 {
     int cur_el = arm_current_el(env);
     unsigned int spsr_idx = aarch64_banked_spsr_index(cur_el);
-    uint32_t spsr = env->banked_spsr[spsr_idx];
+    uint32_t spsr = 0;
     int new_el;
-    bool return_to_aa64 = (spsr & PSTATE_nRW) == 0;
+    bool return_to_aa64;
+
+    if (arm_is_guarded(env)) {
+        spsr = env->gxf.spsr_gl[cur_el];
+    } else {
+        spsr = env->banked_spsr[spsr_idx];
+    }
+
+    return_to_aa64 = (spsr & PSTATE_nRW) == 0;
 
     aarch64_save_sp(env, cur_el);
 
@@ -1041,6 +1050,34 @@ illegal_return:
                   "resuming execution at 0x%" PRIx64 "\n", cur_el, env->pc);
 }
 
+void HELPER(gexit)(CPUARMState *env)
+{
+    int cur_el = arm_current_el(env);
+    uint32_t spsr = env->gxf.spsr_gl[cur_el];
+
+    aarch64_save_sp(env, cur_el);
+
+    if (arm_generate_debug_exceptions(env)) {
+        spsr &= ~PSTATE_SS;
+    }
+
+    spsr &= aarch64_pstate_valid_mask(&env_archcpu(env)->isar);
+    pstate_write(env, spsr);
+
+    if (!arm_singlestep_active(env)) {
+        env->pstate &= ~PSTATE_SS;
+    }
+
+    env->gxf.gxf_status_el[cur_el] &= ~1;
+    aarch64_restore_sp(env, cur_el);
+    env->pc = env->gxf.elr_gl[cur_el];
+    helper_rebuild_hflags_a64(env, cur_el);
+    qemu_log_mask(CPU_LOG_INT, "Guarded execution exit from AArch64 GL%d to "
+                      "AArch64 EL%d PC 0x%" PRIx64 "\n",
+                      cur_el, cur_el, env->pc);
+    return;
+}
+
 /*
  * Square Root and Reciprocal square root
  */
@@ -1099,3 +1136,103 @@ void HELPER(dc_zva)(CPUARMState *env, uint64_t vaddr_in)
 
     memset(mem, 0, blocklen);
 }
+
+static void *get_page_read(CPUARMState *env, uint64_t vaddr_in, int mmu_idx)
+{
+    uint64_t vaddr = vaddr_in & TARGET_PAGE_MASK;
+
+    void *mem = tlb_vaddr_to_host(env, vaddr, MMU_DATA_LOAD, mmu_idx);
+#ifndef CONFIG_USER_ONLY
+    if (unlikely(!mem)) {
+        uintptr_t ra = GETPC();
+
+        /*
+         * Trap if accessing an invalid page.
+         */
+        (void) probe_read(env, vaddr_in, 1, mmu_idx, ra);
+        mem = probe_read(env, vaddr, TARGET_PAGE_SIZE, mmu_idx, ra);
+    }
+#endif
+
+    return mem;
+}
+
+static void *get_page_write(CPUARMState *env, uint64_t vaddr_in, int mmu_idx)
+{
+    uint64_t vaddr = vaddr_in & TARGET_PAGE_MASK;
+
+    void *mem = tlb_vaddr_to_host(env, vaddr, MMU_DATA_STORE, mmu_idx);
+#ifndef CONFIG_USER_ONLY
+    if (unlikely(!mem)) {
+        uintptr_t ra = GETPC();
+
+        /*
+         * Trap if accessing an invalid page.
+         */
+        (void) probe_write(env, vaddr_in, 1, mmu_idx, ra);
+        mem = probe_write(env, vaddr, TARGET_PAGE_SIZE, mmu_idx, ra);
+    }
+#endif
+
+    return mem;
+}
+
+uint64_t HELPER(wkdmc)(CPUARMState *env, uint64_t vaddr_in, uint64_t vaddr_out)
+{
+    int mmu_idx = cpu_mmu_index(env, false);
+    char *in_mem, *out_mem;
+    uint8_t scratch[TARGET_PAGE_SIZE];
+    uint8_t scratch1[TARGET_PAGE_SIZE];
+    vaddr_in &= TARGET_PAGE_MASK;
+    vaddr_out &= ~0x3f;
+    int out_offset = vaddr_out - (vaddr_out & TARGET_PAGE_MASK);
+    int csize = TARGET_PAGE_SIZE - out_offset;
+
+    if (TARGET_PAGE_BITS < 10 || TARGET_PAGE_BITS > 14) {
+        return -1;
+    }
+
+    in_mem = get_page_read(env, vaddr_in, mmu_idx);
+    out_mem = get_page_write(env, vaddr_out, mmu_idx);
+    if (in_mem && out_mem) {
+        memcpy(scratch1, in_mem, TARGET_PAGE_SIZE);
+        int n = WKdm_compress(scratch1, scratch, csize);
+        if (n <= 0) {
+            return n;
+        }
+        if (n > csize) {
+            return -1;
+        }
+        memcpy(out_mem + out_offset, scratch, n);
+        return n >> 6;
+    }
+    return -1;
+}
+
+uint64_t HELPER(wkdmd)(CPUARMState *env, uint64_t vaddr_in, uint64_t vaddr_out)
+{
+    int mmu_idx = cpu_mmu_index(env, false);
+    uint8_t *in_mem, *out_mem;
+    uint8_t scratch[TARGET_PAGE_SIZE];
+    uint8_t scratch2[TARGET_PAGE_SIZE];
+    vaddr_out &= TARGET_PAGE_MASK;
+    vaddr_in &= ~0x3f;
+    int in_offset = vaddr_in - (vaddr_in & TARGET_PAGE_MASK);
+    int csize = TARGET_PAGE_SIZE - in_offset;
+
+    if (TARGET_PAGE_BITS < 10 || TARGET_PAGE_BITS > 14) {
+        return 0x3000;
+    }
+
+    in_mem = get_page_read(env, vaddr_in, mmu_idx);
+    out_mem = get_page_write(env, vaddr_out, mmu_idx);
+    if (in_mem && out_mem) {
+        memcpy(scratch, in_mem + in_offset, csize);
+        if (WKdm_decompress(scratch, scratch2, csize)) {
+            memcpy(out_mem, scratch2, TARGET_PAGE_SIZE);
+            return 0;
+        }
+    }
+    return 0x3000;
+}
+

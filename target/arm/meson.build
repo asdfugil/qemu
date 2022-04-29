@@ -49,7 +49,9 @@ arm_ss.add(when: 'TARGET_AARCH64', if_true: files(
   'sve_helper.c',
   'translate-a64.c',
   'translate-sve.c',
-))
+  'WKdmCompress.c',
+  'WKdmDecompress.c')
+)
 
 arm_softmmu_ss = ss.source_set()
 arm_softmmu_ss.add(files(

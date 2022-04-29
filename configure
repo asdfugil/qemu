@@ -721,7 +721,7 @@ for opt do
   case "$opt" in
   --help|-h) show_help=yes
   ;;
-  --version|-V) exec cat $source_path/VERSION
+  --version|-V) exec cat $source_path/VERSION.QEMU
   ;;
   --prefix=*) prefix="$optarg"
   ;;
@@ -2726,7 +2726,7 @@ if test "$QEMU_GA_DISTRO" = ""; then
   QEMU_GA_DISTRO=Linux
 fi
 if test "$QEMU_GA_VERSION" = ""; then
-    QEMU_GA_VERSION=$(cat $source_path/VERSION)
+    QEMU_GA_VERSION=$(cat $source_path/VERSION.QEMU)
 fi
 
 QEMU_GA_MSI_MINGW_DLL_PATH="$($pkg_config --variable=prefix glib-2.0)/bin"
@@ -2841,7 +2841,7 @@ if test "$static" = "yes" ; then
 fi
 echo "CONFIG_BDRV_RW_WHITELIST=$block_drv_rw_whitelist" >> $config_host_mak
 echo "CONFIG_BDRV_RO_WHITELIST=$block_drv_ro_whitelist" >> $config_host_mak
-qemu_version=$(head $source_path/VERSION)
+qemu_version=$(head $source_path/VERSION.QEMU)
 echo "PKGVERSION=$pkgversion" >>$config_host_mak
 echo "SRC_PATH=$source_path" >> $config_host_mak
 echo "TARGET_DIRS=$target_list" >> $config_host_mak

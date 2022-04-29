@@ -2,33 +2,38 @@
 #define BLOCK_NVME_H
 
 typedef struct QEMU_PACKED NvmeBar {
-    uint64_t    cap;
-    uint32_t    vs;
-    uint32_t    intms;
-    uint32_t    intmc;
-    uint32_t    cc;
-    uint8_t     rsvd24[4];
-    uint32_t    csts;
-    uint32_t    nssr;
-    uint32_t    aqa;
-    uint64_t    asq;
-    uint64_t    acq;
-    uint32_t    cmbloc;
-    uint32_t    cmbsz;
-    uint32_t    bpinfo;
-    uint32_t    bprsel;
-    uint64_t    bpmbl;
-    uint64_t    cmbmsc;
-    uint32_t    cmbsts;
-    uint8_t     rsvd92[3492];
-    uint32_t    pmrcap;
-    uint32_t    pmrctl;
-    uint32_t    pmrsts;
-    uint32_t    pmrebs;
-    uint32_t    pmrswtp;
-    uint32_t    pmrmscl;
-    uint32_t    pmrmscu;
-    uint8_t     css[484];
+    union {
+        uint8_t raw[4096];
+        struct {
+            uint64_t    cap;
+            uint32_t    vs;
+            uint32_t    intms;
+            uint32_t    intmc;
+            uint32_t    cc;
+            uint8_t     rsvd24[4];
+            uint32_t    csts;
+            uint32_t    nssr;
+            uint32_t    aqa;
+            uint64_t    asq;
+            uint64_t    acq;
+            uint32_t    cmbloc;
+            uint32_t    cmbsz;
+            uint32_t    bpinfo;
+            uint32_t    bprsel;
+            uint64_t    bpmbl;
+            uint64_t    cmbmsc;
+            uint32_t    cmbsts;
+            uint8_t     rsvd92[3492];
+            uint32_t    pmrcap;
+            uint32_t    pmrctl;
+            uint32_t    pmrsts;
+            uint32_t    pmrebs;
+            uint32_t    pmrswtp;
+            uint32_t    pmrmscl;
+            uint32_t    pmrmscu;
+            uint8_t     css[484];
+        };
+    };
 } NvmeBar;
 
 enum NvmeBarRegs {
@@ -594,10 +599,12 @@ enum NvmeAdminCommands {
     NVME_ADM_CMD_ASYNC_EV_REQ   = 0x0c,
     NVME_ADM_CMD_ACTIVATE_FW    = 0x10,
     NVME_ADM_CMD_DOWNLOAD_FW    = 0x11,
+    NVME_ADM_CMD_TUNNEL         = 0xd8,
     NVME_ADM_CMD_NS_ATTACHMENT  = 0x15,
     NVME_ADM_CMD_FORMAT_NVM     = 0x80,
     NVME_ADM_CMD_SECURITY_SEND  = 0x81,
     NVME_ADM_CMD_SECURITY_RECV  = 0x82,
+    NVME_ADM_CMD_CREATE_NS      = 0xc6,
 };
 
 enum NvmeIoCommands {
@@ -613,6 +620,7 @@ enum NvmeIoCommands {
     NVME_CMD_ZONE_MGMT_SEND     = 0x79,
     NVME_CMD_ZONE_MGMT_RECV     = 0x7a,
     NVME_CMD_ZONE_APPEND        = 0x7d,
+    NVME_CMD_REPRIORITIZE       = 0x81,
 };
 
 typedef struct QEMU_PACKED NvmeDeleteQ {
@@ -831,10 +839,15 @@ enum NvmeAsyncEventRequest {
 };
 
 typedef struct QEMU_PACKED NvmeAerResult {
-    uint8_t event_type;
-    uint8_t event_info;
-    uint8_t log_page;
-    uint8_t resv;
+    union {
+        uint8_t raw[4];
+        struct {
+            uint8_t event_type;
+            uint8_t event_info;
+            uint8_t log_page;
+            uint8_t resv;
+        };
+    };
 } NvmeAerResult;
 
 typedef struct QEMU_PACKED NvmeZonedResult {
@@ -1039,71 +1052,78 @@ enum NvmeIdCns {
 };
 
 typedef struct QEMU_PACKED NvmeIdCtrl {
-    uint16_t    vid;
-    uint16_t    ssvid;
-    uint8_t     sn[20];
-    uint8_t     mn[40];
-    uint8_t     fr[8];
-    uint8_t     rab;
-    uint8_t     ieee[3];
-    uint8_t     cmic;
-    uint8_t     mdts;
-    uint16_t    cntlid;
-    uint32_t    ver;
-    uint32_t    rtd3r;
-    uint32_t    rtd3e;
-    uint32_t    oaes;
-    uint32_t    ctratt;
-    uint8_t     rsvd100[11];
-    uint8_t     cntrltype;
-    uint8_t     fguid[16];
-    uint8_t     rsvd128[128];
-    uint16_t    oacs;
-    uint8_t     acl;
-    uint8_t     aerl;
-    uint8_t     frmw;
-    uint8_t     lpa;
-    uint8_t     elpe;
-    uint8_t     npss;
-    uint8_t     avscc;
-    uint8_t     apsta;
-    uint16_t    wctemp;
-    uint16_t    cctemp;
-    uint16_t    mtfa;
-    uint32_t    hmpre;
-    uint32_t    hmmin;
-    uint8_t     tnvmcap[16];
-    uint8_t     unvmcap[16];
-    uint32_t    rpmbs;
-    uint16_t    edstt;
-    uint8_t     dsto;
-    uint8_t     fwug;
-    uint16_t    kas;
-    uint16_t    hctma;
-    uint16_t    mntmt;
-    uint16_t    mxtmt;
-    uint32_t    sanicap;
-    uint8_t     rsvd332[180];
-    uint8_t     sqes;
-    uint8_t     cqes;
-    uint16_t    maxcmd;
-    uint32_t    nn;
-    uint16_t    oncs;
-    uint16_t    fuses;
-    uint8_t     fna;
-    uint8_t     vwc;
-    uint16_t    awun;
-    uint16_t    awupf;
-    uint8_t     nvscc;
-    uint8_t     rsvd531;
-    uint16_t    acwu;
-    uint16_t    ocfs;
-    uint32_t    sgls;
-    uint8_t     rsvd540[228];
-    uint8_t     subnqn[256];
-    uint8_t     rsvd1024[1024];
-    NvmePSD     psd[32];
-    uint8_t     vs[1024];
+    union {
+        uint8_t raw[4096];
+        struct {
+            uint16_t    vid;
+            uint16_t    ssvid;
+            uint8_t     sn[20];
+            uint8_t     mn[40];
+            uint8_t     fr[8];
+            uint8_t     rab;
+            uint8_t     ieee[3];
+            uint8_t     cmic;
+            uint8_t     mdts;
+            uint16_t    cntlid;
+            uint32_t    ver;
+            uint32_t    rtd3r;
+            uint32_t    rtd3e;
+            uint32_t    oaes;
+            uint32_t    ctratt;
+            uint8_t     rsvd100[11];
+            uint8_t     cntrltype;
+            uint8_t     fguid[16];
+            uint8_t     rsvd128[128];
+            uint16_t    oacs;
+            uint8_t     acl;
+            uint8_t     aerl;
+            uint8_t     frmw;
+            uint8_t     lpa;
+            uint8_t     elpe;
+            uint8_t     npss;
+            uint8_t     avscc;
+            uint8_t     apsta;
+            uint16_t    wctemp;
+            uint16_t    cctemp;
+            uint16_t    mtfa;
+            uint32_t    hmpre;
+            uint32_t    hmmin;
+            uint8_t     tnvmcap[16];
+            uint8_t     unvmcap[16];
+            uint32_t    rpmbs;
+            uint16_t    edstt;
+            uint8_t     dsto;
+            uint8_t     fwug;
+            uint16_t    kas;
+            uint16_t    hctma;
+            uint16_t    mntmt;
+            uint16_t    mxtmt;
+            uint32_t    sanicap;
+            uint8_t     rsvd332[180];
+            uint8_t     sqes;
+            uint8_t     cqes;
+            uint16_t    maxcmd;
+            uint32_t    nn;
+            uint16_t    oncs;
+            uint16_t    fuses;
+            uint8_t     fna;
+            uint8_t     vwc;
+            uint16_t    awun;
+            uint16_t    awupf;
+            uint8_t     nvscc;
+            uint8_t     rsvd531;
+            uint16_t    acwu;
+            uint16_t    ocfs;
+            uint32_t    sgls;
+            uint8_t     rsvd540[228];
+            uint8_t     subnqn[256];
+            uint8_t     rsvd1024[1024];
+            NvmePSD     psd[32];
+            uint8_t     rsvd3072[518];
+            uint16_t	capacity;
+            uint8_t		vs[504];
+        };
+    };
 } NvmeIdCtrl;
 
 typedef struct NvmeIdCtrlZoned {
@@ -1238,6 +1258,9 @@ enum NvmeFeatureIds {
     NVME_HOST_BEHAVIOR_SUPPORT      = 0x16,
     NVME_COMMAND_SET_PROFILE        = 0x19,
     NVME_SOFTWARE_PROGRESS_MARKER   = 0x80,
+    NVME_NAND_INFO_LOW              = 0xc0,
+    NVME_NAND_INFO_HIGH             = 0xc1,
+    NVME_MSP_TYPE                   = 0xc2,
     NVME_FID_MAX                    = 0x100,
 };
 
@@ -1333,7 +1356,8 @@ typedef struct QEMU_PACKED NvmeIdNs {
     uint8_t     nguid[16];
     uint64_t    eui64;
     NvmeLBAF    lbaf[NVME_MAX_NLBAF];
-    uint8_t     vs[3712];
+    uint32_t    nstype;
+    uint8_t     vs[3708];
 } NvmeIdNs;
 
 #define NVME_ID_NS_NVM_ELBAF_PIF(elbaf) (((elbaf) >> 7) & 0x3)
@@ -1589,4 +1613,14 @@ static inline void _nvme_check_size(void)
     QEMU_BUILD_BUG_ON(sizeof(NvmeZoneDescr) != 64);
     QEMU_BUILD_BUG_ON(sizeof(NvmeDifTuple) != 16);
 }
+
+#define NVME_APPLE_MAX_PEND_CMDS		0x1210
+#define   NVME_APPLE_MAX_PEND_CMDS_VAL	((64 << 16) | 64)
+#define NVME_APPLE_BOOT_STATUS		    0x1300
+#define   NVME_APPLE_BOOT_STATUS_OK		0xde71ce55
+#define NVME_APPLE_BASE_CMD_ID		    0x1308
+#define   NVME_APPLE_BASE_CMD_ID_MASK	0xffff
+#define NVME_APPLE_LINEAR_SQ_CTRL		0x24908
+#define   NVME_APPLE_LINEAR_SQ_CTRL_EN	(1 << 0)
+#define NVME_APPLE_MODESEL              0x1304
 #endif

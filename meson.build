@@ -1,7 +1,7 @@
 project('qemu', ['c'], meson_version: '>=0.59.3',
         default_options: ['warning_level=1', 'c_std=gnu11', 'cpp_std=gnu++11', 'b_colorout=auto',
                           'b_staticpic=false', 'stdsplit=false'],
-        version: files('VERSION'))
+        version: files('VERSION.QEMU'))
 
 add_test_setup('quick', exclude_suites: ['slow', 'thorough'], is_default: true)
 add_test_setup('slow', exclude_suites: ['thorough'], env: ['G_TEST_SLOW=1', 'SPEED=slow'])
@@ -2742,6 +2742,7 @@ if have_system
     'hw/sh4',
     'hw/sparc',
     'hw/sparc64',
+    'hw/spmi',
     'hw/ssi',
     'hw/timer',
     'hw/tpm',

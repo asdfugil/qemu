@@ -282,6 +282,11 @@ static uint64_t pauth_computepac_impdef(uint64_t data, uint64_t modifier,
 static uint64_t pauth_computepac(CPUARMState *env, uint64_t data,
                                  uint64_t modifier, ARMPACKey key)
 {
+    if (arm_current_el(env) && (env->cp15.apctl_el1 & APCTL_KernKeyEn)) {
+        key.lo ^= env->keys.kernel.lo;
+        key.hi ^= env->keys.kernel.hi;
+    }
+
     if (cpu_isar_feature(aa64_pauth_arch, env_archcpu(env))) {
         return pauth_computepac_architected(data, modifier, key);
     } else {
@@ -411,6 +416,9 @@ static void pauth_check_trap(CPUARMState *env, int el, uintptr_t ra)
 
 static bool pauth_key_enabled(CPUARMState *env, int el, uint32_t bit)
 {
+    if (el > 0 && env->cp15.apctl_el1 & APCTL_AppleMode) {
+        return true;
+    }
     return (arm_sctlr(env, el) & bit) != 0;
 }
 

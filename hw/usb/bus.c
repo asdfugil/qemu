@@ -156,6 +156,14 @@ void usb_device_handle_attach(USBDevice *dev)
     }
 }
 
+void usb_device_handle_detach(USBDevice *dev)
+{
+    USBDeviceClass *klass = USB_DEVICE_GET_CLASS(dev);
+    if (klass->handle_detach) {
+        klass->handle_detach(dev);
+    }
+}
+
 void usb_device_handle_reset(USBDevice *dev)
 {
     USBDeviceClass *klass = USB_DEVICE_GET_CLASS(dev);
@@ -178,6 +186,20 @@ void usb_device_handle_data(USBDevice *dev, USBPacket *p)
     USBDeviceClass *klass = USB_DEVICE_GET_CLASS(dev);
     if (klass->handle_data) {
         klass->handle_data(dev, p);
+    }
+}
+
+bool usb_device_can_handle_packet(USBDevice *dev)
+{
+    USBDeviceClass *klass = USB_DEVICE_GET_CLASS(dev);
+    return (klass->handle_packet) != NULL;
+}
+
+void usb_device_handle_packet(USBDevice *dev, USBPacket *p)
+{
+    USBDeviceClass *klass = USB_DEVICE_GET_CLASS(dev);
+    if (klass->handle_packet) {
+        klass->handle_packet(dev, p);
     }
 }
 

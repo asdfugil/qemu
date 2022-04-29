@@ -25,7 +25,7 @@
 #include "block/nvme.h"
 
 #define NVME_MAX_CONTROLLERS 32
-#define NVME_MAX_NAMESPACES  256
+#define NVME_MAX_NAMESPACES  16
 #define NVME_EUI64_DEFAULT ((uint64_t)0x5254000000000000)
 
 QEMU_BUILD_BUG_ON(NVME_MAX_NAMESPACES > NVME_NSID_BROADCAST - 1);
@@ -94,6 +94,7 @@ typedef struct NvmeNamespaceParams {
     bool     detached;
     bool     shared;
     uint32_t nsid;
+    uint32_t nstype;
     QemuUUID uuid;
     uint64_t eui64;
     bool     eui64_default;
@@ -302,8 +303,13 @@ typedef struct NvmeRequest {
     struct NvmeSQueue       *sq;
     struct NvmeNamespace    *ns;
     BlockAIOCB              *aiocb;
+    uint32_t                nsid; /* migration only */
+    uint16_t                sqid; /* migration only */
     uint16_t                status;
     void                    *opaque;
+    bool                    aer;
+    uint8_t                 aer_id;
+    uint8_t                 id;
     NvmeCqe                 cqe;
     NvmeCmd                 cmd;
     BlockAcctCookie         acct;
@@ -335,6 +341,7 @@ static inline const char *nvme_adm_opc_str(uint8_t opc)
     case NVME_ADM_CMD_ASYNC_EV_REQ:     return "NVME_ADM_CMD_ASYNC_EV_REQ";
     case NVME_ADM_CMD_NS_ATTACHMENT:    return "NVME_ADM_CMD_NS_ATTACHMENT";
     case NVME_ADM_CMD_FORMAT_NVM:       return "NVME_ADM_CMD_FORMAT_NVM";
+    case NVME_ADM_CMD_TUNNEL:           return "NVME_ADM_CMD_TUNNEL";
     default:                            return "NVME_ADM_CMD_UNKNOWN";
     }
 }
@@ -353,6 +360,7 @@ static inline const char *nvme_io_opc_str(uint8_t opc)
     case NVME_CMD_ZONE_MGMT_SEND:   return "NVME_ZONED_CMD_MGMT_SEND";
     case NVME_CMD_ZONE_MGMT_RECV:   return "NVME_ZONED_CMD_MGMT_RECV";
     case NVME_CMD_ZONE_APPEND:      return "NVME_ZONED_CMD_ZONE_APPEND";
+    case NVME_CMD_REPRIORITIZE:     return "NVME_CMD_REPRIORITIZE";
     default:                        return "NVME_NVM_CMD_UNKNOWN";
     }
 }
@@ -361,12 +369,14 @@ typedef struct NvmeSQueue {
     struct NvmeCtrl *ctrl;
     uint16_t    sqid;
     uint16_t    cqid;
+    uint32_t    entry_size;
     uint32_t    head;
     uint32_t    tail;
+    uint32_t    restored_size; /* migration use */
     uint32_t    size;
     uint64_t    dma_addr;
     QEMUTimer   *timer;
-    NvmeRequest *io_req;
+    NvmeRequest **io_req;
     QTAILQ_HEAD(, NvmeRequest) req_list;
     QTAILQ_HEAD(, NvmeRequest) out_req_list;
     QTAILQ_ENTRY(NvmeSQueue) entry;
@@ -402,6 +412,7 @@ typedef struct NvmeParams {
     uint8_t  mdts;
     uint8_t  vsl;
     bool     use_intel_id;
+    bool     is_apple_ans;
     uint8_t  zasl;
     bool     auto_transition_zones;
     bool     legacy_cmb;
@@ -438,6 +449,7 @@ typedef struct NvmeCtrl {
         uint8_t      *buf;
         bool         cmse;
         hwaddr       cba;
+        uint32_t     size;
     } cmb;
 
     struct {
@@ -447,6 +459,7 @@ typedef struct NvmeCtrl {
     } pmr;
 
     uint8_t     aer_mask;
+    uint8_t     num_aer;
     NvmeRequest **aer_reqs;
     QTAILQ_HEAD(, NvmeAsyncEvent) aer_queue;
     int         aer_queued;
@@ -462,9 +475,11 @@ typedef struct NvmeCtrl {
     NvmeNamespace   namespace;
     NvmeNamespace   *namespaces[NVME_MAX_NAMESPACES + 1];
     NvmeSQueue      **sq;
+    unsigned long   *sq_map;
     NvmeCQueue      **cq;
-    NvmeSQueue      admin_sq;
-    NvmeCQueue      admin_cq;
+    unsigned long   *cq_map;
+    NvmeSQueue      *admin_sq;
+    NvmeCQueue      *admin_cq;
     NvmeIdCtrl      id_ctrl;
 
     struct {
