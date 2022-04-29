@@ -274,7 +274,7 @@ static void t8030_memory_setup(MachineState *machine)
     g_virt_base += slide_virt - slide_phys;
 
     info->dram_base = T8030_DRAM_BASE;
-    info->dram_size = T8030_DRAM_SIZE;
+    info->dram_size = machine->ram_size;
 
     /* TrustCache */
     info->trustcache_pa = macho_load_trustcache(tms->trustcache_filename, nsas,
@@ -1406,7 +1406,7 @@ static void t8030_machine_init(MachineState *machine)
     hwaddr *ranges;
 
     tms->sysmem = get_system_memory();
-    allocate_ram(tms->sysmem, "DRAM", T8030_DRAM_BASE, T8030_DRAM_SIZE, 0);
+    allocate_ram(tms->sysmem, "DRAM", T8030_DRAM_BASE, machine->ram_size, 0);
 
     hdr = macho_load_file(machine->kernel_filename);
     assert(hdr);
@@ -1645,9 +1645,9 @@ static bool t8030_get_kaslr_off(Object *obj, Error **errp)
 static ram_addr_t t8030_machine_fixup_ram_size(ram_addr_t size)
 {
     if (size != T8030_DRAM_SIZE) {
-        warn_report("The T8030 machine only supports 4 GiB RAM. Overriding");
+       // warn_report("The T8030 machine only supports 4 GiB RAM. Overriding");
     }
-    return T8030_DRAM_SIZE;
+    return size;
 }
 
 static void t8030_machine_class_init(ObjectClass *oc, void *data)
